@@ -1,0 +1,77 @@
+# Rooster to Calendar Sync Configuration
+
+# Path to the Excel file (update this to match your setup)
+excel_file: "Rooster  2026.xlsm"
+
+# Output directories (relative to project root)
+output_dir: "output/calendars"
+archive_dir: "output/archive"
+log_dir: "logs"
+
+# Excel structure settings
+excel:
+  # Row where dates are located (1-indexed)
+  date_row: 5
+  # First row with employee data (1-indexed)
+  first_employee_row: 7
+  # Column containing employee names (A=1, B=2, C=3)
+  name_column: 3
+  # Column containing group/role info
+  group_column: 2
+  # First column with schedule data (D=4)
+  first_schedule_column: 4
+
+# Shift codes - Timed events (with specific start/end times)
+timed_shifts:
+  O:
+    name: "Morning Shift"
+    start: "06:30"
+    end: "15:00"
+  M:
+    name: "Afternoon Shift"
+    start: "14:30"
+    end: "23:00"
+  N:
+    name: "Night Shift"
+    start: "22:30"
+    end: "07:00" # Ends next day
+    spans_midnight: true
+  W:
+    name: "Weekend Shift"
+    start: "08:00"
+    end: "18:00"
+
+# Shift codes - All-day events (no specific times, just labels)
+allday_events:
+  D:
+    name: "Day Off"
+  V:
+    name: "Vacation"
+  Z:
+    name: "Sick"
+  TB:
+    name: "Toolbox"
+  TR:
+    name: "Training"
+  ST:
+    name: "Stock Measurement"
+  I:
+    name: "Introduction Day"
+  X:
+    name: "School"
+  C:
+    name: "Course"
+  T:
+    name: "Return Day"
+
+# Codes to ignore (no calendar event created)
+ignore_codes:
+  - ""
+  - " "
+
+# Calendar settings
+calendar:
+  # Timezone for events
+  timezone: "Europe/Amsterdam"
+  # Calendar name prefix
+  name_prefix: "Work Schedule"

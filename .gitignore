@@ -1,0 +1,14 @@
+# Sensitive Data
+*.xlsm
+*.xls
+auth.json
+
+# System/Environment
+venv/
+__pycache__/
+.DS_Store
+logs/
+.sync_state.json
+
+# Output - we keep calendars for the web hosting, but ignore the archive
+output/archive/
