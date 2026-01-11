@@ -73,9 +73,9 @@ You need to run the download script manually once to handle the Microsoft 2FA lo
     ```powershell
     python scripts/download_rooster.py
     ```
-3.  **Action:** The Chrome browser will open.
+3.  **Action:** The Chrome browser will open and navigate to the Excel file.
 4.  **Action:** Log in to your Microsoft account. Approve the MFA on your phone.
-5.  **Wait:** Once logged in, the script will detect the redirect, save `auth.json`, and close the browser.
+5.  **Wait:** Once logged in, the script will automatically detect the session, download the file, and **close the browser itself**. Do not close it manually unless it gets stuck for more than 2 minutes.
 
 *Verification:* Check if `auth.json` exists in the project folder.
 
