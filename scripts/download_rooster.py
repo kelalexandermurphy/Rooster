@@ -4,13 +4,12 @@ import logging
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 # --- CONFIGURATION ---
-# I have cleaned the Proofpoint wrapper from your URL and added 'download=1' to force a file download
-TARGET_URL = "https://amspecllc-my.sharepoint.com/:x:/r/personal/okan_ozturk_amspecgroup_com/Documents/Desktop/Rooster%202026.xlsm?download=1"
-OUTPUT_FILENAME = "Rooster 2026.xlsm"
-AUTH_FILE = "auth.json"  # Stores your login cookies
+BASE_URL = "https://amspecllc-my.sharepoint.com/:x:/r/personal/okan_ozturk_amspecgroup_com/Documents/Desktop/Rooster%202026.xlsm?d=wf6d964fbb614486688c587499e010aaa&e=4%3a4c933ba0b5f2418abbb97d622c2865ec&sharingv2=true&fromShare=true"
+
+OUTPUT_FILENAME = "Rooster  2026.xlsm"
+AUTH_FILE = "auth.json"
 LOG_FILE = "logs/download_log.txt"
 
-# Ensure logs directory exists
 os.makedirs("logs", exist_ok=True)
 
 # --- LOGGING SETUP ---
@@ -24,74 +23,93 @@ logging.basicConfig(
 )
 
 def log_feedback(type, message):
-    """Helper to ensure consistent user feedback"""
     if type == "SUCCESS":
-        logging.info(f"✅ SUCCESS: {message}")
-        print(f"\033[92m✅ SUCCESS: {message}\033[0m") # Green text
+        logging.info(f"SUCCESS: {message}")
+        print(f"SUCCESS: {message}")
     elif type == "ERROR":
-        logging.error(f"❌ ERROR: {message}")
-        print(f"\033[91m❌ ERROR: {message}\033[0m") # Red text
+        logging.error(f"ERROR: {message}")
+        print(f"ERROR: {message}")
     elif type == "INFO":
-        logging.info(f"ℹ️  INFO: {message}")
-        print(f"ℹ️  INFO: {message}")
+        logging.info(f"INFO: {message}")
+        print(f"INFO: {message}")
 
 def run():
     with sync_playwright() as p:
         log_feedback("INFO", "Initializing Browser...")
-
-        # We launch headless=False so you can see the login screen if needed
-        # On M1 Macs and Windows, Chromium is generally the most stable for this
         browser = p.chromium.launch(headless=False)
 
-        # Load auth state if it exists
         context_args = {}
         if os.path.exists(AUTH_FILE):
             log_feedback("INFO", "Found existing authentication state.")
             context_args["storage_state"] = AUTH_FILE
-        else:
-            log_feedback("INFO", "No authentication state found. You will need to log in manually.")
 
         context = browser.new_context(**context_args)
         page = context.new_page()
 
         try:
-            log_feedback("INFO", f"Navigating to SharePoint...")
+            # --- STEP 1: LOAD VIEWER ---
+            log_feedback("INFO", "Step 1: Opening Excel Viewer...")
+            page.goto(BASE_URL)
 
-            # Start the download by navigating to the URL
-            # We use expect_download to grab the event
-            try:
-                with page.expect_download(timeout=60000) as download_info:
-                    page.goto(TARGET_URL)
+            # Auth Check
+            if "login.microsoftonline.com" in page.url:
+                log_feedback("INFO", "Login required. Please log in.")
+                try:
+                    page.wait_for_url("https://amspecllc-my.sharepoint.com/**", timeout=120000)
+                    log_feedback("SUCCESS", "Login detected. Saving state...")
+                    context.storage_state(path=AUTH_FILE)
+                except PlaywrightTimeoutError:
+                    return
 
-                    # DETECT LOGIN SCREEN:
-                    # If we are redirected to a login page (microsoftonline.com), wait for user
-                    if "login.microsoftonline.com" in page.url:
-                        log_feedback("INFO", "Login required! Please log in inside the browser window.")
-                        log_feedback("INFO", "Script is pausing for 120 seconds to allow you to complete MFA/Login...")
+            log_feedback("INFO", "Waiting for session to stabilize...")
+            page.wait_for_load_state("domcontentloaded")
+            time.sleep(10) # Wait for JS to initialize
 
-                        # Wait for the user to finish login and for the URL to redirect back to SharePoint
-                        # We wait for the URL to contain the original sharepoint domain
-                        page.wait_for_url("https://amspecllc-my.sharepoint.com/**", timeout=120000)
+            # --- STEP 2: EXTRACT DYNAMIC DOWNLOAD LINK ---
+            log_feedback("INFO", "Step 2: Extracting dynamic download token...")
 
-                        # Save the new state so next time works automatically
-                        context.storage_state(path=AUTH_FILE)
-                        log_feedback("SUCCESS", "Authentication saved to auth.json")
+            # Microsoft stores the download URL with a temporary auth token in a global variable
+            # We execute JS to retrieve it.
+            download_url = page.evaluate("""() => {
+                if (typeof _wopiContextJson !== 'undefined' && _wopiContextJson.FileGetUrl) {
+                    return _wopiContextJson.FileGetUrl;
+                }
+                return null;
+            }""")
 
-                download = download_info.value
+            if not download_url:
+                log_feedback("ERROR", "Could not find dynamic download URL in page variables.")
+                # Fallback: Try to find it in the HTML text if JS variable is hidden/renamed
+                content = page.content()
+                import re
+                match = re.search(r'"FileGetUrl":"(https:[^"]+)"', content)
+                if match:
+                    download_url = match.group(1).replace(r'\u0026', '&')
+                    log_feedback("INFO", "Found URL via Regex fallback.")
+                else:
+                    raise Exception("Failed to extract download URL.")
 
-                # Overwrite the local file
-                download.save_as(OUTPUT_FILENAME)
-                log_feedback("SUCCESS", f"File downloaded and saved as: {os.path.abspath(OUTPUT_FILENAME)}")
+            log_feedback("INFO", "Found dynamic URL. Triggering download...")
 
-            except PlaywrightTimeoutError:
-                log_feedback("ERROR", "Download timed out. Did you log in successfully?")
-                raise # Re-raise to signal failure to caller
-            except Exception as e:
-                log_feedback("ERROR", f"An unexpected error occurred during download: {e}")
-                raise
+            # --- STEP 3: DOWNLOAD ---
+            with page.expect_download(timeout=60000) as download_info:
+                # We use window.open to respect the auth context
+                page.evaluate(f"window.open('{download_url}')")
+
+            download = download_info.value
+            download.save_as(OUTPUT_FILENAME)
+
+            # Verify file size
+            size = os.path.getsize(OUTPUT_FILENAME)
+            if size < 2000: # If smaller than 2KB, it's likely an HTML error page
+                 raise Exception(f"Downloaded file is too small ({size} bytes). Likely an error page.")
+
+            log_feedback("SUCCESS", f"File downloaded: {OUTPUT_FILENAME} ({size} bytes)")
 
         except Exception as e:
-            log_feedback("ERROR", f"Browser automation failed: {e}")
+            log_feedback("ERROR", f"Process failed: {e}")
+            # Debug snapshot
+            page.screenshot(path="logs/error_final.png")
             raise
         finally:
             browser.close()
